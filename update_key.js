@@ -5,7 +5,6 @@ import { promisify } from "util";
 import path from "path";
 
 const API_KEY_1 = process.env.API_KEY_1;
-const API_KEY_2 = process.env.API_KEY_2;
 const BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 const execAsync = promisify(exec);
@@ -27,6 +26,9 @@ async function retryOperation(operation, name) {
     } catch (error) {
       lastError = error;
       console.warn(`Attempt ${i + 1}/${MAX_RETRIES} failed for ${name}: ${error.message}`);
+      if (error.response && error.response.data) {
+        console.warn("Error details:", JSON.stringify(error.response.data, null, 2));
+      }
       if (i < MAX_RETRIES - 1) await sleep(RETRY_DELAY);
     }
   }
@@ -177,8 +179,8 @@ async function processSite(url, siteName, outputFile, API_KEY) {
 }
 
 async function main() {
-  if (!API_KEY_1 || !API_KEY_2) {
-    console.warn("WARNING: API Keys (API_KEY_1 or API_KEY_2) are missing from environment variables.");
+  if (!API_KEY_1) {
+    console.warn("WARNING: API_KEY_1 is missing from environment variables.");
   }
 
   const tasks = [
@@ -187,12 +189,6 @@ async function main() {
       "MegaCloud",
       "key.txt",
       API_KEY_1
-    ),
-    processSite(
-      "https://cloudvidz.net/js/player/m/v2/pro/embed-1.min.js?v=" + Date.now(),
-      "CloudVidz",
-      "rabbit.txt",
-      API_KEY_2
     )
   ];
 

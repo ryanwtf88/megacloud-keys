@@ -1,10 +1,9 @@
-# MegaCloud & CloudVidz Key Extractor
-
+# MegaCloud Key Extractor
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-success.svg)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
-Automated tool to extract decryption keys for **MegaCloud** (RabbitStream) and **CloudVidz** streaming services. This repository uses **Google Gemini 2.0 Flash** AI to intelligently deobfuscate and extract the 64-bit encryption keys used by these players.
+Automated tool to extract decryption keys for **MegaCloud** (RabbitStream). This repository uses **Google Gemini 2.0 Flash** AI to intelligently deobfuscate and extract the 64-bit encryption keys used by these players.
 
 The keys are automatically updated and committed to this repository.
 
@@ -13,13 +12,11 @@ The keys are automatically updated and committed to this repository.
 | Service | File | Description |
 | :--- | :--- | :--- |
 | **MegaCloud** | [`key.txt`](./key.txt) | 64-character hex decryption key |
-| **CloudVidz** | [`rabbit.txt`](./rabbit.txt) | 64-character hex decryption key |
 
 ## Features
 
 - **Automated Extraction**: Fetches the latest player scripts from live sites.
 - **AI-Powered Analysis**: Uses Google Gemini 2.0 to handle complex JavaScript obfuscation.
-- **Parallel Processing**: Extracts keys from multiple sources simultaneously.
 - **Robust Validation**: Ensures only valid 64-character hex keys are committed.
 - **GitHub Actions**: Fully automated workflow to keep keys up-to-date.
 

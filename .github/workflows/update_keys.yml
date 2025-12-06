@@ -40,7 +40,7 @@ jobs:
       - name: Run script to update key.txt
         env:
           API_KEY_1: ${{ secrets.API_KEY_1 }}
-          API_KEY_2: ${{ secrets.API_KEY_2 }}
+
         run: node update_key.js
 
       - name: Commit and push updated files
