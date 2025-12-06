@@ -50,9 +50,36 @@ async function generateContent(prompt, API_KEY) {
   }, "AI Generation");
 }
 
-function isValidKey(key) {
-  // 64 character hex string
-  return typeof key === 'string' && /^[0-9a-fA-F]{64}$/.test(key.trim());
+function normalizeKey(key) {
+  if (typeof key !== 'string') return null;
+  key = key.trim();
+
+  // Case 1: Already 64-char Hex
+  if (/^[0-9a-fA-F]{64}$/.test(key)) {
+    return key;
+  }
+
+  // Case 2: Base64 string (try to buffer decode)
+  // Common Base64 regex
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(key)) {
+    try {
+      const buffer = Buffer.from(key, 'base64');
+      const hex = buffer.toString('hex');
+      if (hex.length === 64) return hex;
+    } catch (e) { }
+  }
+
+  // Case 3: Hex encoded string (e.g. AI returned hex of the string "key")
+  if (/^[0-9a-fA-F]+$/.test(key)) {
+    try {
+      // Try decoding hex to string, maybe that string is the key?
+      const buffer = Buffer.from(key, 'hex');
+      const str = buffer.toString('utf8');
+      if (/^[0-9a-fA-F]{64}$/.test(str)) return str;
+    } catch (e) { }
+  }
+
+  return null;
 }
 
 async function processSite(url, siteName, outputFile, API_KEY) {
@@ -130,8 +157,9 @@ async function processSite(url, siteName, outputFile, API_KEY) {
 
     console.log(`[${siteName}] Result:`, finalKey);
 
-    if (isValidKey(finalKey)) {
-      await writeFileAsync(outputFile, finalKey.trim(), "utf8");
+    const normalized = normalizeKey(finalKey);
+    if (normalized) {
+      await writeFileAsync(outputFile, normalized, "utf8");
       console.log(`[${siteName}] SUCCESS! Key written to ${outputFile}`);
     } else {
       console.error(`[${siteName}] Generated key is Invalid (Not 64-char hex): ${finalKey}`);
