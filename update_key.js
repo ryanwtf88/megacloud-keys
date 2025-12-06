@@ -97,7 +97,7 @@ async function processSite(url, siteName, outputFile, API_KEY) {
       xor_value = xorMatch[0];
     }
 
-    let extra_message = "Decode the following obfuscated script. Extract and retain ONLY the relevant code that directly generates the 64-bit secret key. Remove all irrelevant, unused, dead code, or undefined variables. Output CLEAN, WORKING JavaScript only. The last statement should be 'return variableName;' where variableName holds the final string key. Do NOT wrap it in a function. Do NOT use console.log.";
+    let extra_message = "Decode the following obfuscated script. Extract and retain ONLY the relevant code that directly generates the 64-bit secret key. Remove all irrelevant, unused, dead code, or undefined variables. Output CLEAN, WORKING JavaScript only. The last statement should be 'return variableName;' where variableName holds the final string key. Do NOT wrap it in a function. Do NOT use console.log. IMPORTANT: The final key MUST be a 64-character HEXADECIMAL string. If the extracted logic produces Base64, you MUST add code to convert it to Hex.";
 
     if (xor_value) {
       extra_message += ` Note: We detected ${xor_value} in the context. If this variable is used for XOR operations in key mappings, ensure the logic includes it properly or simplifies it.`;
