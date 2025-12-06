@@ -2,126 +2,174 @@ import fs from "fs";
 import axios from "axios";
 import { exec } from "child_process";
 import { promisify } from "util";
+import path from "path";
 
 const API_KEY_1 = process.env.API_KEY_1;
 const API_KEY_2 = process.env.API_KEY_2;
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=`;
+const BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 const execAsync = promisify(exec);
 const writeFileAsync = promisify(fs.writeFile);
+const unlinkAsync = promisify(fs.unlink);
 
-async function generateContent(prompt, API_KEY) {
-  try {
-    const response = await axios.post(API_URL + API_KEY, {
-      contents: [
-        {
-          parts: [{ text: prompt }],
-        },
-      ],
-    });
-    return response.data.candidates[0]?.content?.parts[0]?.text.trim();
-  } catch (error) {
-    console.error(error);
-    return null;
-  }
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000;
+
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function processSite(url, scriptFile, outputFile, API_KEY) {
-  console.log(`Fetching script from ${url}...`);
+async function retryOperation(operation, name) {
+  let lastError;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.warn(`Attempt ${i + 1}/${MAX_RETRIES} failed for ${name}: ${error.message}`);
+      if (i < MAX_RETRIES - 1) await sleep(RETRY_DELAY);
+    }
+  }
+  throw lastError;
+}
+
+async function generateContent(prompt, API_KEY) {
+  if (!API_KEY) throw new Error("API Key is missing!");
+
+  return retryOperation(async () => {
+    const response = await axios.post(`${BASE_API_URL}?key=${API_KEY}`, {
+      contents: [{ parts: [{ text: prompt }] }],
+    });
+
+    const candidate = response.data.candidates?.[0];
+    if (!candidate || !candidate.content || !candidate.content.parts || !candidate.content.parts[0]) {
+      throw new Error("Invalid response structure from AI API");
+    }
+
+    return candidate.content.parts[0].text.trim();
+  }, "AI Generation");
+}
+
+function isValidKey(key) {
+  // 64 character hex string
+  return typeof key === 'string' && /^[0-9a-fA-F]{64}$/.test(key.trim());
+}
+
+async function processSite(url, siteName, outputFile, API_KEY) {
+  const uniqueId = Math.random().toString(36).substring(7);
+  const tempInput = `input_${uniqueId}.txt`;
+  const tempOutput = `output_${uniqueId}.js`;
+
+  console.log(`[${siteName}] Starting process for ${url}`);
 
   try {
-    const response = await axios.get(url);
-    console.log("Received script.");
+    // Fetch Script
+    await retryOperation(async () => {
+      const response = await axios.get(url);
+      await writeFileAsync(tempInput, response.data, "utf8");
+    }, `Fetch ${siteName}`);
+    console.log(`[${siteName}] Script fetched.`);
 
-    await writeFileAsync(scriptFile, response.data, "utf8");
+    // Deobfuscate
+    console.log(`[${siteName}] Running deobfuscate...`);
+    try {
+      await execAsync(`node deobfuscate.js ${tempInput} ${tempOutput}`);
+    } catch (error) {
+      console.error(`[${siteName}] Deobfuscation failed:`, error.stderr || error.message);
+      throw error;
+    }
+    console.log(`[${siteName}] Deobfuscation complete.`);
 
-    console.log("input.txt successfully written.");
+    // Read result
+    const data = await fs.promises.readFile(tempOutput, "utf8");
 
-    console.log("Running deobfuscate.js...");
-    await execAsync("node deobfuscate.js");
+    // Extract logic
+    // This regex looks for the IIFE structure often used in these obfuscations
+    const match = data.match(/\(\(\)\s*=>\s*\{([\s\S]*?)try\s*{/);
+    if (!match) {
+      throw new Error(`[${siteName}] Could not find matching obfuscated pattern in output.`);
+    }
 
-    console.log("deobfuscate.js finished.");
+    const xor_value_regex = /\b([a-zA-Z_$][\w$]*)\s*=\s*(?!0\b)(\d+)\s*;/g;
+    let xor_value;
+    const xorMatch = match[0].match(xor_value_regex);
+    if (xorMatch) {
+      xor_value = xorMatch[0];
+    }
 
-    console.log("Reading output.js.");
+    let extra_message = "Decode the following obfuscated script. Extract and retain ONLY the relevant code that directly generates the 64-bit secret key. Remove all irrelevant, unused, dead code, or undefined variables. Output CLEAN, WORKING JavaScript only. The last statement should be 'return variableName;' where variableName holds the final string key. Do NOT wrap it in a function. Do NOT use console.log.";
 
-    fs.readFile("output.js", "utf8", async (err, data) => {
-      if (err) {
-        console.error("!Error reading file!", err);
-        return;
-      }
+    if (xor_value) {
+      extra_message += ` Note: We detected ${xor_value} in the context. If this variable is used for XOR operations in key mappings, ensure the logic includes it properly or simplifies it.`;
+    }
 
-      try {
-        const match = data.match(/\(\(\)\s*=>\s*\{([\s\S]*?)try\s*{/);
-        if (!match) {
-          console.error("!No match found!");
-          return;
-        }
-        console.log("Match found.");
-        const xor_value_regex = /\b([a-zA-Z_$][\w$]*)\s*=\s*(?!0\b)(\d+)\s*;/g;
-        let xor_value;
-        if (match[0].match(xor_value_regex))
-          xor_value = match[0].match(xor_value_regex)[0];
-        let extra_message = "Decode the following obfuscated script, extract, and retain only the relevant code that directly generates the 64-bit secret key.Remove all irrelevant, unused, or undefined code — keep just the cleaned-up JavaScript that performs the key generation.The cleaned-up script should be self-contained and functional, with the last line printing the generated key (using console.log), and do not wrap it inside any function.Do not include comments, explanations, or additional fluff — output code only."
-        
-        extra_message += xor_value
-          ? `Also we have ${xor_value},so when you do mapping, xor each element with the ${xor_value}`
-          : "";
-        
-        const prompt = match[0] + "\n" + extra_message;
+    const prompt = `${match[0]}\n\n/* ${extra_message} */`;
 
-        console.log("Waiting for LLLM response.");
+    console.log(`[${siteName}] Requesting AI analysis...`);
+    const decoded_code = await generateContent(prompt, API_KEY);
 
-        const decoded_code = await generateContent(prompt, API_KEY);
-        console.log(decoded_code);
+    if (!decoded_code) throw new Error(`[${siteName}] AI returned empty response.`);
 
-        const lines = decoded_code.split("\n");
+    // Clean up markdown code blocks if present
+    const cleanCode = decoded_code.replace(/^```(javascript|js)?/gm, '').replace(/^```/gm, '').trim();
 
-        const startsWithFence = lines[0]?.trim().startsWith("```javascript");
-        const endsWithFence = lines[lines.length - 1]?.trim() === "```";
+    let finalCodeToRun = cleanCode;
+    if (finalCodeToRun.includes("console.log")) {
+      finalCodeToRun = finalCodeToRun.replace(/console\.log/g, "return");
+    }
 
-        const final_code = (
-          startsWithFence && endsWithFence ? lines.slice(1, -1) : lines
-        )
-          .join("\n")
-          .replace("console.log", "return");
+    // Execute the code safely
+    console.log(`[${siteName}] Executing generated code...`);
+    let finalKey;
+    try {
+      finalKey = new Function(finalCodeToRun)();
+    } catch (e) {
+      console.error(`[${siteName}] Execution error of generated code:\n${finalCodeToRun}\n`);
+      throw new Error(`Execution failed: ${e.message}`);
+    }
 
-        let finalKey = new Function(final_code)();
+    console.log(`[${siteName}] Result:`, finalKey);
 
-        console.log("\nFinal key is: ");
-        console.log(finalKey + "\n");
+    if (isValidKey(finalKey)) {
+      await writeFileAsync(outputFile, finalKey.trim(), "utf8");
+      console.log(`[${siteName}] SUCCESS! Key written to ${outputFile}`);
+    } else {
+      console.error(`[${siteName}] Generated key is Invalid (Not 64-char hex): ${finalKey}`);
+    }
 
-        if (typeof finalKey === "string") {
-          await writeFileAsync(outputFile, finalKey.trim(), "utf8");
-
-          console.log("Key successfully written.");
-        } else {
-          console.error("Generated code did not return a key.");
-        }
-      } catch (error) {
-        console.error("Error processing output.js.", error);
-      }
-    });
   } catch (error) {
-    console.error("Error in main.", error);
+    console.error(`[${siteName}] FAILED:`, error.message);
+  } finally {
+    // Cleanup temp files
+    try {
+      if (fs.existsSync(tempInput)) await unlinkAsync(tempInput);
+      if (fs.existsSync(tempOutput)) await unlinkAsync(tempOutput);
+    } catch (e) { console.error(`[${siteName}] Cleanup warning:`, e.message); }
   }
 }
 
 async function main() {
-  await processSite(
-    "https://megacloud.blog/js/player/a/v2/pro/embed-1.min.js?v=" + Date.now(),
-    "input.txt",
-    "key.txt",
-    API_KEY_1
-  );
+  if (!API_KEY_1 || !API_KEY_2) {
+    console.warn("WARNING: API Keys (API_KEY_1 or API_KEY_2) are missing from environment variables.");
+  }
 
-  await processSite(
-    "https://cloudvidz.net/js/player/m/v2/pro/embed-1.min.js?v=" + Date.now(),
-    "input.txt",
-    "rabbit.txt",
-    API_KEY_2
-  );
+  const tasks = [
+    processSite(
+      "https://megacloud.blog/js/player/a/v2/pro/embed-1.min.js?v=" + Date.now(),
+      "MegaCloud",
+      "key.txt",
+      API_KEY_1
+    ),
+    processSite(
+      "https://cloudvidz.net/js/player/m/v2/pro/embed-1.min.js?v=" + Date.now(),
+      "CloudVidz",
+      "rabbit.txt",
+      API_KEY_2
+    )
+  ];
+
+  await Promise.allSettled(tasks);
+  console.log("All tasks completed.");
 }
 
-main()
-  .then()
-  .catch((error) => console.error(error));
+main().catch(console.error);
