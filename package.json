@@ -5,7 +5,7 @@
   "main": "deobfuscate.js",
   "dependencies": {
     "@babel/core": "^7.27.4",
-    "axios": "^1.10.0",
+    "axios": "^1.13.5",
     "child_process": "^1.0.2",
     "fs": "^0.0.1-security"
   }
